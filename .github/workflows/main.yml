@@ -68,7 +68,7 @@ jobs:
         run: |
           make build_tools
           # 验证 custom_builder 是否生成
-          ls -la ./tools/custom_builder/custom_builder
+          pwd & ls & ls -la ./tools/custom_builder/custom_builder
 
       # 4. 准备配置文件（复制仓库内的 config/telegraf.conf 到指定路径）
       - name: Prepare config file
