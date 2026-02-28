@@ -61,7 +61,6 @@ jobs:
         with:
           go-version: ${{ github.event.inputs.go_version }}
           cache: true
-          cache-dependency-path: telegraf/go.mod
 
       # 3. 构建自定义构建工具（make build_tools）
       - name: Build custom builder tools
