@@ -1,0 +1,105 @@
+name: Build Telegraf with Custom Builder
+
+# 手动触发（可按需添加自定义参数）
+on:
+  workflow_dispatch:
+    inputs:
+      go_version:
+        description: 'Go version to use'
+        required: true
+        default: '1.21'
+        type: string
+      retention_days:
+        description: 'Artifact retention days'
+        required: true
+        default: '7'
+        type: number
+
+# 权限配置
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  build-telegraf:
+    name: Build ${{ matrix.os_arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 定义编译平台矩阵（GOOS_GOARCH 格式）
+        os_arch:
+          - windows_amd64
+          - windows_386
+          - linux_amd64
+          - linux_386
+
+    steps:
+      - name: Parse OS/Arch
+        id: parse
+        run: |
+          # 拆分 os_arch 为 GOOS 和 GOARCH
+          OS=$(echo ${{ matrix.os_arch }} | cut -d '_' -f1)
+          ARCH=$(echo ${{ matrix.os_arch }} | cut -d '_' -f2)
+          # 设置输出变量
+          echo "goos=$OS" >> $GITHUB_OUTPUT
+          echo "goarch=$ARCH" >> $GITHUB_OUTPUT
+          # 定义可执行文件后缀（windows 为 .exe）
+          if [ "$OS" = "windows" ]; then
+            echo "ext=.exe" >> $GITHUB_OUTPUT
+          else
+            echo "ext=" >> $GITHUB_OUTPUT
+          fi
+
+      # 1. 检出代码（你的 fork 仓库）
+      - name: Checkout Telegraf repo
+        uses: actions/checkout@v4
+
+      # 2. 进入仓库目录并安装 Go 环境
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ github.event.inputs.go_version }}
+          cache: true
+          cache-dependency-path: telegraf/go.mod
+
+      # 3. 构建自定义构建工具（make build_tools）
+      - name: Build custom builder tools
+        working-directory: ./telegraf
+        run: |
+          make build_tools
+          # 验证 custom_builder 是否生成
+          ls -la ./tools/custom_builder/custom_builder
+
+      # 4. 准备配置文件（复制仓库内的 config/telegraf.conf 到指定路径）
+      - name: Prepare config file
+        working-directory: ./telegraf
+        run: |
+          cp config/telegraf.conf ./telegraf.conf
+          # 验证配置文件存在
+          cat ./telegraf.conf
+
+      # 5. 运行 custom_builder 构建 Telegraf（指定配置文件）
+      - name: Build Telegraf with custom_builder
+        working-directory: ./telegraf
+        env:
+          GOOS: ${{ steps.parse.outputs.goos }}
+          GOARCH: ${{ steps.parse.outputs.goarch }}
+          CGO_ENABLED: 0  # 禁用CGO保证跨平台兼容性
+        run: |
+          # 执行自定义构建工具，指定本地配置文件
+          ./tools/custom_builder/custom_builder \
+            --config ./telegraf.conf \
+            --output "telegraf-${{ steps.parse.outputs.goos }}-${{ steps.parse.outputs.goarch }}${{ steps.parse.outputs.ext }}"
+          # 验证产物生成
+          ls -la "telegraf-${{ steps.parse.outputs.goos }}-${{ steps.parse.outputs.goarch }}${{ steps.parse.outputs.ext }}"
+
+      # 6. 上传编译产物
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: telegraf-${{ matrix.os_arch }}
+          path: |
+            telegraf/telegraf-${{ steps.parse.outputs.goos }}-${{ steps.parse.outputs.goarch }}${{ steps.parse.outputs.ext }}
+            telegraf/telegraf.conf  # 附带配置文件
+          retention-days: ${{ github.event.inputs.retention_days }}
